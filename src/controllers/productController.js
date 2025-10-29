@@ -26,14 +26,15 @@ const getProductById = asyncHandler(async (req, res) => {
 
 // CREATE product
 const createProduct = asyncHandler(async (req, res) => {
-  const { name, price, description } = req.body;
+  const { name, price, description, rating } = req.body;
   const images = req.file ? [`/uploads/${req.file.filename}`] : [];
 
   const product = new Product({
     name,
     price,
     description,
-    images, // Save as array
+    rating: rating || 4.5,
+    images,
   });
 
   const created = await product.save();
@@ -54,9 +55,10 @@ const updateProduct = asyncHandler(async (req, res) => {
     product.name = req.body.name || product.name;
     product.price = req.body.price || product.price;
     product.description = req.body.description || product.description;
+    product.rating = req.body.rating || product.rating;
 
     if (req.file) {
-      product.images = [`/uploads/${req.file.filename}`]; // Save as array
+      product.images = [`/uploads/${req.file.filename}`];
     }
 
     const updated = await product.save();
