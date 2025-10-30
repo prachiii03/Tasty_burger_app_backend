@@ -215,4 +215,4 @@ app.listen(PORT, () => {
   console.log(`🐛 Debug uploads: http://localhost:${PORT}/debug/uploads`);
   console.log(`🐛 Debug products: http://localhost:${PORT}/debug/products`);
   console.log(`🐛 Debug routes: http://localhost:${PORT}/debug/routes`);
-});
+}); 

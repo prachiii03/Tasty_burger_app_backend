@@ -18,10 +18,11 @@ const getDashboardOverview = asyncHandler(async (req, res) => {
     // Get wishlist count - handle both array and object structure
     const wishlistCount = Array.isArray(user.wishlist) ? user.wishlist.length : 0;
     
+    // ✅ FIXED: Changed from 'items.product' to 'orderItems.product'
     const recentOrders = await Order.find({ user: userId })
       .sort({ createdAt: -1 })
       .limit(5)
-      .populate('items.product');
+      .populate('orderItems.product'); // ✅ FIXED: This was the main issue
 
     res.json({
       success: true,
@@ -33,14 +34,22 @@ const getDashboardOverview = asyncHandler(async (req, res) => {
           completedOrders: totalOrders - pendingOrders,
           wishlistCount
         },
-        recentOrders
+        recentOrders: recentOrders.map(order => ({
+          _id: order._id,
+          createdAt: order.createdAt,
+          items: order.orderItems.length, // ✅ FIXED: Use orderItems instead of items
+          totalAmount: order.totalPrice, // ✅ FIXED: Use totalPrice instead of totalAmount
+          status: order.status,
+          orderItems: order.orderItems // Include full order items if needed
+        }))
       }
     });
   } catch (error) {
     console.error('Dashboard overview error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching dashboard data'
+      message: 'Error fetching dashboard data',
+      error: error.message // ✅ Include error message for debugging
     });
   }
 });
@@ -94,18 +103,23 @@ const getUserOrders = asyncHandler(async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
+    // ✅ FIXED: Changed from 'items.product' to 'orderItems.product'
     const orders = await Order.find({ user: req.user._id || req.user.id })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .populate('items.product');
+      .populate('orderItems.product'); // ✅ FIXED: This was the main issue
 
     const totalOrders = await Order.countDocuments({ user: req.user._id || req.user.id });
 
     res.json({
       success: true,
       data: {
-        orders,
+        orders: orders.map(order => ({
+          ...order.toObject(),
+          items: order.orderItems.length, // ✅ FIXED: Add items count for frontend
+          totalAmount: order.totalPrice // ✅ FIXED: Map totalPrice to totalAmount for frontend
+        })),
         currentPage: page,
         totalPages: Math.ceil(totalOrders / limit),
         totalOrders

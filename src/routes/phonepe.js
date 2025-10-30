@@ -3,7 +3,7 @@ const router = express.Router();
 const axios = require("axios");
 const crypto = require("crypto");
 const Order = require('../models/Order');
-const protect = require('../middleware/authMiddleware'); // ✅ This is the correct import
+const protect = require('../middleware/authMiddleware');
 
 const SALT = process.env.PHONEPE_SALT;
 const MERCHANT_ID = process.env.PHONEPE_MERCHANT_ID;
@@ -18,7 +18,7 @@ function makeChecksum(payloadBase64) {
   return sha256 + "###" + KEY_INDEX;
 }
 
-// ✅ Create payment - FIXED: Use 'protect' instead of 'authMiddleware'
+// ✅ Create payment
 router.post("/pay", protect, async (req, res) => {
   try {
     const { orderId, amount, mobile, name } = req.body;
@@ -35,7 +35,8 @@ router.post("/pay", protect, async (req, res) => {
     // Update order with payment details
     await Order.findByIdAndUpdate(orderId, {
       paymentMethod: 'PHONEPE',
-      merchantTransactionId
+      merchantTransactionId,
+      paymentStatus: 'pending' // ✅ Set initial payment status
     });
 
     const payload = {
@@ -85,7 +86,7 @@ router.post("/pay", protect, async (req, res) => {
   }
 });
 
-// ✅ Check payment status - FIXED: Use 'protect' instead of 'authMiddleware'
+// ✅ Check payment status
 router.post("/check-status", protect, async (req, res) => {
   try {
     const { merchantTransactionId } = req.body;
@@ -125,33 +126,66 @@ router.post("/check-status", protect, async (req, res) => {
   }
 });
 
-// ✅ Handle callback from PhonePe
+// ✅ IMPROVED: Handle callback from PhonePe
 router.post("/callback", async (req, res) => {
   try {
-    console.log("📩 PhonePe Callback Received:", req.body);
+    console.log("📩 PhonePe Callback Received:", JSON.stringify(req.body, null, 2));
     
     const { response } = req.body;
-    if (response) {
-      const decodedResponse = Buffer.from(response, 'base64').toString('utf8');
-      const paymentData = JSON.parse(decodedResponse);
+    
+    if (!response) {
+      console.error("❌ No response in callback");
+      return res.status(400).json({ 
+        success: false, 
+        message: "No response data received" 
+      });
+    }
+
+    // Decode the base64 response
+    const decodedResponse = Buffer.from(response, 'base64').toString('utf8');
+    console.log("🔍 Decoded callback response:", decodedResponse);
+    
+    const paymentData = JSON.parse(decodedResponse);
+    console.log("📊 Parsed payment data:", JSON.stringify(paymentData, null, 2));
+    
+    const { merchantTransactionId, transactionId, amount, code, state } = paymentData.data;
+    
+    if (!merchantTransactionId) {
+      console.error("❌ No merchantTransactionId in callback");
+      return res.status(400).json({ 
+        success: false, 
+        message: "No transaction ID received" 
+      });
+    }
+
+    // Find order by merchantTransactionId
+    const order = await Order.findOne({ merchantTransactionId });
+    
+    if (!order) {
+      console.error(`❌ Order not found for merchantTransactionId: ${merchantTransactionId}`);
+      return res.status(404).json({ 
+        success: false, 
+        message: "Order not found" 
+      });
+    }
+
+    console.log(`🔍 Found order: ${order._id}, current payment status: ${order.paymentStatus}`);
+
+    // Update order based on payment status
+    if (code === 'PAYMENT_SUCCESS' || state === 'COMPLETED') {
+      order.paymentStatus = 'completed';
+      order.status = 'processing';
+      order.phonepeTransactionId = transactionId;
+      await order.save();
       
-      const { merchantTransactionId, transactionId, amount, code } = paymentData.data;
-      
-      // Find order by merchantTransactionId
-      const order = await Order.findOne({ merchantTransactionId });
-      
-      if (order) {
-        if (code === 'PAYMENT_SUCCESS') {
-          order.paymentStatus = 'completed';
-          order.status = 'processing';
-          await order.save();
-          console.log(`✅ Payment successful for order: ${order._id}`);
-        } else {
-          order.paymentStatus = 'failed';
-          await order.save();
-          console.log(`❌ Payment failed for order: ${order._id}`);
-        }
-      }
+      console.log(`✅ Payment successful for order: ${order._id}`);
+      console.log(`💰 Transaction ID: ${transactionId}, Amount: ${amount}`);
+    } else if (code === 'PAYMENT_ERROR' || state === 'FAILED') {
+      order.paymentStatus = 'failed';
+      await order.save();
+      console.log(`❌ Payment failed for order: ${order._id}`);
+    } else {
+      console.log(`⚠️ Unknown payment status - Code: ${code}, State: ${state}`);
     }
 
     // Send success response to PhonePe
@@ -159,11 +193,46 @@ router.post("/callback", async (req, res) => {
       success: true,
       message: "Callback processed successfully"
     });
+
   } catch (err) {
-    console.error("Callback error:", err);
+    console.error("❌ Callback processing error:", err);
+    console.error("Error details:", err.message);
     res.status(500).json({ 
       success: false, 
-      message: "Callback processing failed" 
+      message: "Callback processing failed",
+      error: err.message 
+    });
+  }
+});
+
+// ✅ Add direct status check endpoint
+router.get("/order-status/:orderId", protect, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    const order = await Order.findById(orderId);
+    
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        paymentStatus: order.paymentStatus,
+        status: order.status,
+        paymentMethod: order.paymentMethod,
+        merchantTransactionId: order.merchantTransactionId
+      }
+    });
+  } catch (err) {
+    console.error("Order status check error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Error checking order status"
     });
   }
 });
