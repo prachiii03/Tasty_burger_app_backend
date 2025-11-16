@@ -172,17 +172,33 @@ router.post("/callback", async (req, res) => {
     console.log(`🔍 Found order: ${order._id}, current payment status: ${order.paymentStatus}`);
 
     // Update order based on payment status
+    let updatedOrder;
     if (code === 'PAYMENT_SUCCESS' || state === 'COMPLETED') {
-      order.paymentStatus = 'completed';
-      order.status = 'processing';
-      order.phonepeTransactionId = transactionId;
-      await order.save();
+      updatedOrder = await Order.findByIdAndUpdate(
+        order._id,
+        {
+          paymentStatus: 'completed',
+          status: 'confirmed',
+          phonepeTransactionId: transactionId,
+          isPaid: true,
+          paidAt: new Date()
+        },
+        { new: true }
+      );
       
       console.log(`✅ Payment successful for order: ${order._id}`);
       console.log(`💰 Transaction ID: ${transactionId}, Amount: ${amount}`);
+      console.log(`📋 Updated order:`, JSON.stringify(updatedOrder, null, 2));
+      
     } else if (code === 'PAYMENT_ERROR' || state === 'FAILED') {
-      order.paymentStatus = 'failed';
-      await order.save();
+      updatedOrder = await Order.findByIdAndUpdate(
+        order._id,
+        {
+          paymentStatus: 'failed',
+          status: 'payment_failed'
+        },
+        { new: true }
+      );
       console.log(`❌ Payment failed for order: ${order._id}`);
     } else {
       console.log(`⚠️ Unknown payment status - Code: ${code}, State: ${state}`);
@@ -191,7 +207,8 @@ router.post("/callback", async (req, res) => {
     // Send success response to PhonePe
     res.status(200).json({
       success: true,
-      message: "Callback processed successfully"
+      message: "Callback processed successfully",
+      code: code || state
     });
 
   } catch (err) {
@@ -205,7 +222,7 @@ router.post("/callback", async (req, res) => {
   }
 });
 
-// ✅ Add direct status check endpoint
+// ✅ ENHANCED: Add direct status check endpoint
 router.get("/order-status/:orderId", protect, async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -216,6 +233,23 @@ router.get("/order-status/:orderId", protect, async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Order not found"
+      });
+    }
+
+    // If payment is completed, return full order details
+    if (order.paymentStatus === 'completed') {
+      return res.json({
+        success: true,
+        data: {
+          _id: order._id,
+          paymentStatus: order.paymentStatus,
+          status: order.status,
+          paymentMethod: order.paymentMethod,
+          merchantTransactionId: order.merchantTransactionId,
+          totalPrice: order.totalPrice,
+          isPaid: order.isPaid,
+          paidAt: order.paidAt
+        }
       });
     }
 

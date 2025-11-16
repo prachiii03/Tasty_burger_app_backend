@@ -191,9 +191,95 @@ const getOrderById = asyncHandler(async (req, res) => {
   }
 });
 
+// ✅ NEW: Update order status (Admin only)
+const updateOrderStatus = asyncHandler(async (req, res) => {
+  try {
+    const { status } = req.body;
+    
+    // Validate status
+    const validStatuses = ['pending', 'processing', 'completed', 'cancelled'];
+    if (!status || !validStatuses.includes(status.toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
+      });
+    }
+
+    const order = await Order.findById(req.params.id);
+    
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    // Update status
+    order.status = status.toLowerCase();
+    
+    // If status is completed, update payment status
+    if (status.toLowerCase() === 'completed') {
+      order.paymentStatus = 'paid';
+      order.paidAt = new Date();
+    }
+    
+    // If status is cancelled, update payment status
+    if (status.toLowerCase() === 'cancelled') {
+      order.paymentStatus = 'cancelled';
+    }
+
+    await order.save();
+
+    // Populate and return updated order
+    const updatedOrder = await Order.findById(order._id)
+      .populate('orderItems.product')
+      .populate('user', 'name email');
+
+    console.log(`✅ Order ${order._id} status updated to: ${status}`);
+
+    res.json({
+      success: true,
+      message: 'Order status updated successfully',
+      data: updatedOrder
+    });
+
+  } catch (error) {
+    console.error('❌ Update order status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update order status',
+      error: error.message
+    });
+  }
+});
+
+// ✅ NEW: Get all orders (Admin only)
+const getAllOrders = asyncHandler(async (req, res) => {
+  try {
+    const orders = await Order.find({})
+      .populate('orderItems.product')
+      .populate('user', 'name email')
+      .sort({ createdAt: -1 });
+    
+    res.json({
+      success: true,
+      data: orders
+    });
+  } catch (error) {
+    console.error('Get all orders error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching orders',
+      error: error.message
+    });
+  }
+});
+
 module.exports = {
   createOrder,
   getOrders,
   getUserOrders,
   getOrderById,
+  updateOrderStatus,  // ✅ NEW
+  getAllOrders,       // ✅ NEW
 };
